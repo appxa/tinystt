@@ -7,6 +7,14 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#define tinystt_popen  _popen
+#define tinystt_pclose _pclose
+#else
+#define tinystt_popen  popen
+#define tinystt_pclose pclose
+#endif
+
 static std::string model_path() {
     if (const char *e = getenv("TINYSTT_MODEL")) return e;
     return "ggml-tiny.en.bin";
@@ -14,16 +22,21 @@ static std::string model_path() {
 
 static bool decode_audio(const std::string &in, std::vector<float> &pcm) {
     char cmd[4096];
+#ifdef _WIN32
+    const char *nulldev = "NUL";
+#else
+    const char *nulldev = "/dev/null";
+#endif
     snprintf(cmd, sizeof(cmd),
-        "ffmpeg -nostdin -loglevel error -i \"%s\" -f f32le -acodec pcm_f32le -ac 1 -ar 16000 - 2>/dev/null",
-        in.c_str());
-    FILE *p = popen(cmd, "r");
+        "ffmpeg -nostdin -loglevel error -i \"%s\" -f f32le -acodec pcm_f32le -ac 1 -ar 16000 - 2>%s",
+        in.c_str(), nulldev);
+    FILE *p = tinystt_popen(cmd, "rb");
     if (!p) return false;
     float buf[4096];
     size_t n;
     while ((n = fread(buf, sizeof(float), 4096, p)) > 0)
         pcm.insert(pcm.end(), buf, buf + n);
-    return pclose(p) == 0 && !pcm.empty();
+    return tinystt_pclose(p) == 0 && !pcm.empty();
 }
 
 static std::string srt_time(int64_t t) {
