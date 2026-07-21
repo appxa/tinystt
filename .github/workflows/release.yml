@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y cmake g++ ninja-build
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF
 
       - name: Build
         run: cmake --build build --config Release -j 2
