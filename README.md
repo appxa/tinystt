@@ -3,33 +3,45 @@
 CPU-only CLI that transcribes any video/audio to sentence-level `.srt`
 using whisper.cpp tiny.en.
 
-## Build
+## Requirements
+
+C++17, cmake ≥ 3.22, g++, ffmpeg, git.
+
+## Install (build + PATH)
 
 ```bash
+git clone https://github.com/appxa/tinystt.git
+cd tinystt
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j4
+cmake --build build -j$(nproc)
+install -m 755 build/tinystt ~/.local/bin/tinystt
+```
+
+Ensure `~/.local/bin` is on PATH (logout/login if `tinystt` not found):
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Download the model once (cwd, or set `TINYSTT_MODEL`):
+
+```bash
+curl -L -o ggml-tiny.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
 ```
 
 ## Usage
 
 ```bash
-curl -L -o ggml-tiny.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
-
-./build/tinystt input.mp4    # → input.srt
-TINYSTT_THREADS=2 ./build/tinystt input.mp4   # optional: more cores
+tinystt input.mp4                 # → input.srt
+TINYSTT_THREADS=2 tinystt input.mp4
+TINYSTT_MODEL=/path/to/ggml-tiny.en.bin tinystt input.mp4
 ```
 
-Default uses 1 CPU thread. Set `TINYSTT_THREADS=N` for more.
+Default: 1 CPU thread. Model from cwd or `TINYSTT_MODEL`.
 
-Put `ggml-tiny.en.bin` and the video file in the same folder, then run
-`tinystt video.mp4` — model picked from cwd (or `TINYSTT_MODEL`).
-
-## Requirements
-
-C++17, cmake ≥ 3.22, ffmpeg.
-
-whisper.cpp fetched at build time via CMake FetchContent — no submodules.
+whisper.cpp is fetched at build time via CMake FetchContent — no submodules.
 
 ## License
 
