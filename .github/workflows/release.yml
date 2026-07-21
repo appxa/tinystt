@@ -1,0 +1,86 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: tinystt-linux-x64
+            archive: tar.gz
+          - os: windows-latest
+            asset: tinystt-windows-x64
+            archive: zip
+          - os: macos-latest
+            asset: tinystt-macos-x64
+            archive: tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j 2
+
+      - name: Pack (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          BIN=build/tinystt
+          test -x "$BIN" || BIN=build/Release/tinystt
+          cp "$BIN" dist/tinystt
+          chmod +x dist/tinystt
+          tar -C dist -czf ${{ matrix.asset }}.tar.gz tinystt
+
+      - name: Pack (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $bin = "build/tinystt.exe"
+          if (-not (Test-Path $bin)) { $bin = "build/Release/tinystt.exe" }
+          Copy-Item $bin dist/tinystt.exe
+          Compress-Archive -Path dist/tinystt.exe -DestinationPath ${{ matrix.asset }}.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}.tar.gz
+            ${{ matrix.asset }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
