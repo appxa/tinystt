@@ -1,5 +1,5 @@
-// tinysst — CPU-only whisper.cpp tiny.en -> word-level .srt subtitle generator
-// usage: tinysst input.mp4  ->  input.srt
+// tinystt — CPU-only whisper.cpp tiny.en -> sentence-level .srt
+// usage: tinystt input.mp4  ->  input.srt
 
 #include "whisper.h"
 #include <cstdio>
@@ -8,7 +8,7 @@
 #include <vector>
 
 static std::string model_path() {
-    if (const char *e = getenv("TINYSST_MODEL")) return e;
+    if (const char *e = getenv("TINYSTT_MODEL")) return e;
     return "ggml-tiny.en.bin";
 }
 
@@ -41,16 +41,23 @@ int main(int argc, char **argv) {
     std::string in = argv[1], mp = model_path();
 
     std::vector<float> pcm;
-    if (!decode_audio(in, pcm)) { fprintf(stderr, "tinysst: ffmpeg failed\n"); return 2; }
+    if (!decode_audio(in, pcm)) { fprintf(stderr, "tinystt: ffmpeg failed\n"); return 2; }
 
     auto cparams = whisper_context_default_params();
     cparams.use_gpu = false;
     whisper_context *ctx = whisper_init_from_file_with_params(mp.c_str(), cparams);
-    if (!ctx) { fprintf(stderr, "tinysst: model not found at %s\n", mp.c_str()); return 3; }
+    if (!ctx) { fprintf(stderr, "tinystt: model not found at %s\n", mp.c_str()); return 3; }
 
     auto wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    wp.language = "en"; wp.n_threads = 4; wp.print_progress = true;
-    wp.token_timestamps = true;
+    wp.language = "en";
+    // default 1 core; override with TINYSTT_THREADS=N
+    if (const char *t = getenv("TINYSTT_THREADS")) {
+        int n = atoi(t);
+        wp.n_threads = n > 0 ? n : 1;
+    } else {
+        wp.n_threads = 1;
+    }
+    wp.print_progress = true;
 
     if (whisper_full(ctx, wp, pcm.data(), int(pcm.size()))) { whisper_free(ctx); return 4; }
 
@@ -64,40 +71,19 @@ int main(int argc, char **argv) {
     if (!f) { whisper_free(ctx); return 5; }
 
     int n_seg = whisper_full_n_segments(ctx), cue = 0;
-    std::string word; int64_t wt0 = -1, wt1 = -1;
-
-    auto flush = [&]() {
-        if (word.empty()) return;
-        // strip whisper's internal markers like [_TT_200] [_BEG_]
-        size_t bracket = word.find("[_");
-        if (bracket != std::string::npos) {
-            if (bracket == 0) { word.clear(); return; } // pure tag, drop cue
-            word.resize(bracket);
-        }
-        if (word.empty()) return;
-        fprintf(f, "%d\n%s --> %s\n%s\n\n", ++cue,
-                srt_time(wt0).c_str(), srt_time(wt1).c_str(), word.c_str());
-        word.clear();
-    };
-
     for (int i = 0; i < n_seg; ++i) {
-        int n_tok = whisper_full_n_tokens(ctx, i);
-        for (int j = 0; j < n_tok; ++j) {
-            auto td = whisper_full_get_token_data(ctx, i, j);
-            const char *txt = whisper_full_get_token_text(ctx, i, j);
-            if (td.t0 < 0) continue;
-            if (txt[0] == ' ' && !word.empty()) flush();
-            if (word.empty()) {
-                word = (txt[0] == ' ') ? (txt + 1) : txt;
-                wt0 = td.t0; wt1 = td.t1;
-            } else {
-                word += txt; wt1 = td.t1;
-            }
-        }
+        const char *txt = whisper_full_get_segment_text(ctx, i);
+        if (!txt || !*txt) continue;
+        // skip leading space whisper sometimes adds
+        while (*txt == ' ') ++txt;
+        if (!*txt) continue;
+        fprintf(f, "%d\n%s --> %s\n%s\n\n", ++cue,
+                srt_time(whisper_full_get_segment_t0(ctx, i)).c_str(),
+                srt_time(whisper_full_get_segment_t1(ctx, i)).c_str(),
+                txt);
     }
-    flush();
     fclose(f);
     whisper_free(ctx);
-    fprintf(stderr, "tinysst: wrote %s (%d words)\n", out.c_str(), cue);
+    fprintf(stderr, "tinystt: wrote %s (%d cues)\n", out.c_str(), cue);
     return 0;
 }
